@@ -1878,6 +1878,7 @@ bool8 HandleFaintedMonActions(void)
 {
     if (gBattleTypeFlags & BATTLE_TYPE_SAFARI)
         return FALSE;
+
     do
     {
         s32 i;
@@ -1907,6 +1908,7 @@ bool8 HandleFaintedMonActions(void)
             } while (++gBattleStruct->faintedActionsBattlerId != gBattlersCount);
             gBattleStruct->faintedActionsState = 3;
             break;
+
         case 2:
             OpponentSwitchInResetSentPokesToOpponentValue(gBattlerFainted);
             if (++gBattleStruct->faintedActionsBattlerId == gBattlersCount)
@@ -1914,10 +1916,12 @@ bool8 HandleFaintedMonActions(void)
             else
                 gBattleStruct->faintedActionsState = 1;
             break;
+
         case 3:
             gBattleStruct->faintedActionsBattlerId = 0;
             gBattleStruct->faintedActionsState++;
             // fall through
+
         case 4:
             do
             {
@@ -1925,19 +1929,31 @@ bool8 HandleFaintedMonActions(void)
                 if (gBattleMons[gBattleStruct->faintedActionsBattlerId].hp == 0
                  && !(gAbsentBattlerFlags & gBitTable[gBattleStruct->faintedActionsBattlerId]))
                 {
-                    BattleScriptExecute(BattleScript_HandleFaintedMon);
+                    // Check if the fainted Pokémon belongs to the player
+                    if (GetBattlerSide(gBattlerFainted) == B_SIDE_PLAYER)
+                    {
+                        gBattlerAttacker = gBattlerTarget; // Set attacker to the fainted battler
+                        gBattlescriptCurrInstr = BattleScript_ActionSwitch; // Execute opponent switch
+                    }
+                    else
+                    {
+                        gBattlescriptCurrInstr = BattleScript_HandleFaintedMon; // Standard faint handling
+                    }
+                    BattleScriptExecute(gBattlescriptCurrInstr);
                     gBattleStruct->faintedActionsState = 5;
                     return TRUE;
                 }
             } while (++gBattleStruct->faintedActionsBattlerId != gBattlersCount);
             gBattleStruct->faintedActionsState = 6;
             break;
+
         case 5:
             if (++gBattleStruct->faintedActionsBattlerId == gBattlersCount)
                 gBattleStruct->faintedActionsState = 6;
             else
                 gBattleStruct->faintedActionsState = 4;
             break;
+
         case 6:
             if (AbilityBattleEffects(ABILITYEFFECT_INTIMIDATE1, 0, 0, 0, 0)
              || AbilityBattleEffects(ABILITYEFFECT_TRACE, 0, 0, 0, 0)
@@ -1946,6 +1962,7 @@ bool8 HandleFaintedMonActions(void)
                 return TRUE;
             gBattleStruct->faintedActionsState++;
             break;
+
         case FAINTED_ACTIONS_MAX_CASE:
             break;
         }
