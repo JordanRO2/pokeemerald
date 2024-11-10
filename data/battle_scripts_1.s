@@ -3086,39 +3086,50 @@ BattleScript_PrintFullBox::
 	endselectionscript
 
 BattleScript_ActionSwitch::
-	hpthresholds2 BS_ATTACKER
-	printstring STRINGID_RETURNMON
-	setbyte sDMG_MULTIPLIER, 2
-	jumpifbattletype BATTLE_TYPE_DOUBLE, BattleScript_PursuitSwitchDmgSetMultihit
-	setmultihit 1
-	goto BattleScript_PursuitSwitchDmgLoop
+    hpthresholds2 BS_ATTACKER
+    printstring STRINGID_RETURNMON
+    setbyte sDMG_MULTIPLIER, 2
+    jumpifbattletype BATTLE_TYPE_DOUBLE, BattleScript_PursuitSwitchDmgSetMultihit
+    setmultihit 1
+    goto BattleScript_PursuitSwitchDmgLoop
+
 BattleScript_PursuitSwitchDmgSetMultihit::
-	setmultihit 2
+    setmultihit 2
+
 BattleScript_PursuitSwitchDmgLoop::
-	jumpifnopursuitswitchdmg BattleScript_DoSwitchOut
-	swapattackerwithtarget
-	trysetdestinybondtohappen
-	call BattleScript_PursuitDmgOnSwitchOut
-	swapattackerwithtarget
+    jumpifnopursuitswitchdmg BattleScript_DoSwitchOut
+    swapattackerwithtarget
+    trysetdestinybondtohappen
+    call BattleScript_PursuitDmgOnSwitchOut
+    swapattackerwithtarget
+
 BattleScript_DoSwitchOut::
-	decrementmultihit BattleScript_PursuitSwitchDmgLoop
-	switchoutabilities BS_ATTACKER
-	waitstate
-	returnatktoball
-	waitstate
-	drawpartystatussummary BS_ATTACKER
-	switchhandleorder BS_ATTACKER, 1
-	getswitchedmondata BS_ATTACKER
-	switchindataupdate BS_ATTACKER
-	hpthresholds BS_ATTACKER
-	printstring STRINGID_SWITCHINMON
-	hidepartystatussummary BS_ATTACKER
-	switchinanim BS_ATTACKER, FALSE
-	waitstate
-	switchineffects BS_ATTACKER
-	moveendcase MOVEEND_IMMUNITY_ABILITIES
-	moveendcase MOVEEND_MIRROR_MOVE
-	end2
+    decrementmultihit BattleScript_PursuitSwitchDmgLoop
+    switchoutabilities BS_ATTACKER
+    waitstate
+    returnatktoball
+    waitstate
+    drawpartystatussummary BS_ATTACKER
+    jumpifbattlerside BS_ATTACKER, B_SIDE_OPPONENT, BattleScript_AISwitch
+    switchhandleorder BS_ATTACKER, 1
+    getswitchedmondata BS_ATTACKER
+    switchindataupdate BS_ATTACKER
+    hpthresholds BS_ATTACKER
+    printstring STRINGID_SWITCHINMON
+    hidepartystatussummary BS_ATTACKER
+    switchinanim BS_ATTACKER, FALSE
+    waitstate
+    switchineffects BS_ATTACKER
+    moveendcase MOVEEND_IMMUNITY_ABILITIES
+    moveendcase MOVEEND_MIRROR_MOVE
+    end2
+
+BattleScript_AISwitch::
+    choosepokemon BS_ATTACKER
+    switchinanim BS_ATTACKER, FALSE
+    waitstate
+    switchineffects BS_ATTACKER
+    end2
 
 BattleScript_PursuitDmgOnSwitchOut::
 	pause B_WAIT_TIME_SHORT
