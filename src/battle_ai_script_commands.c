@@ -309,6 +309,75 @@ void BattleAI_HandleItemUseBeforeAISetup(u8 defaultScoreMoves)
     BattleAI_SetupAIData(defaultScoreMoves);
 }
 
+// Refined move scoring function
+static void RefinedScoreMove(u8 moveIndex)
+{
+    u16 move = gBattleMons[sBattler_AI].moves[moveIndex];
+    u16 target = gBattlerTarget;
+    u8 moveType = gBattleMoves[move].type;
+    u16 predictedDamage;
+    u16 score = 0;
+    
+    // 1. Type Effectiveness: Multiply score by effectiveness
+    u16 effectiveness = TypeCalc(move, sBattler_AI, target);
+    if (effectiveness == AI_EFFECTIVENESS_x4)
+        score += 40;
+    else if (effectiveness == AI_EFFECTIVENESS_x2)
+        score += 20;
+    else if (effectiveness == AI_EFFECTIVENESS_x0_5)
+        score -= 10;
+    else if (effectiveness == AI_EFFECTIVENESS_x0_25)
+        score -= 20;
+    else if (effectiveness == AI_EFFECTIVENESS_x0)
+        score = 0; // Move does nothing, so skip it entirely
+
+    // 2. Stat Changes: Boost score if the move changes important stats
+    if (gBattleMoves[move].effect == EFFECT_ATTACK_UP || gBattleMoves[move].effect == EFFECT_DEFENSE_UP)
+        score += 15; // Boosting Attack/Defense is valuable
+    if (gBattleMoves[move].effect == EFFECT_SPEED_DOWN || gBattleMoves[move].effect == EFFECT_ACCURACY_DOWN)
+        score += 10; // Lowering opponent's Speed/Accuracy can be very beneficial
+
+    // 3. Status Effects: Give additional score for moves inflicting status conditions
+    if (gBattleMoves[move].effect == EFFECT_PARALYZE && !(gBattleMons[target].status1 & STATUS1_PARALYSIS))
+        score += 15; // Paralysis can limit opponent's movement
+    if (gBattleMoves[move].effect == EFFECT_BURN && !(gBattleMons[target].status1 & STATUS1_BURN))
+        score += 10; // Burn reduces physical damage, useful against physical attackers
+    if (gBattleMoves[move].effect == EFFECT_SLEEP && !(gBattleMons[target].status1 & STATUS1_SLEEP))
+        score += 20; // Sleep is very powerful as it stops opponent from moving
+
+    // 4. Predicted Damage: Calculate estimated damage and incorporate it into the score
+    predictedDamage = CalculatePredictedDamage(sBattler_AI, target, move);
+    score += predictedDamage / 10; // Add predicted damage to score, scaled down
+
+    // 5. Move Priority: Prioritize moves with higher priority, especially for faster KO
+    if (gBattleMoves[move].priority > 0)
+        score += 20; // High-priority moves are valuable in critical situations
+
+    // 6. Opponent Prediction: Anticipate and counter the opponent’s predicted action
+    if (OpponentLikelyToSwitch(target))
+        score += 15; // Score higher if we predict the opponent will switch out
+    else if (OpponentLikelyToUseStatus(target))
+        score += 10; // Score higher if the move could block or punish status moves
+
+    // Store refined score
+    AI_THINKING_STRUCT->score[moveIndex] = score;
+}
+
+// Updated scoring in the main AI processing function
+static void RefinedMoveScoring(void)
+{
+    s32 i;
+
+    for (i = 0; i < MAX_MON_MOVES; i++)
+    {
+        if (gBattleMons[sBattler_AI].moves[i] != MOVE_NONE)
+        {
+            RefinedScoreMove(i); // Call refined scoring for each move
+        }
+    }
+}
+
+// This would be called in place of the default scoring system
 void BattleAI_SetupAIData(u8 defaultScoreMoves)
 {
     s32 i;
@@ -319,18 +388,10 @@ void BattleAI_SetupAIData(u8 defaultScoreMoves)
     for (i = 0; i < sizeof(struct AI_ThinkingStruct); i++)
         data[i] = 0;
 
-    // Conditional score reset, unlike Ruby.
-    for (i = 0; i < MAX_MON_MOVES; i++)
-    {
-        if (defaultScoreMoves & 1)
-            AI_THINKING_STRUCT->score[i] = 100;
-        else
-            AI_THINKING_STRUCT->score[i] = 0;
-
-        defaultScoreMoves >>= 1;
-    }
-
     moveLimitations = CheckMoveLimitations(gActiveBattler, 0, MOVE_LIMITATIONS_ALL);
+
+    // Refined scoring logic
+    RefinedMoveScoring();
 
     // Ignore moves that aren't possible to use.
     for (i = 0; i < MAX_MON_MOVES; i++)
@@ -343,40 +404,6 @@ void BattleAI_SetupAIData(u8 defaultScoreMoves)
 
     gBattleResources->AI_ScriptsStack->size = 0;
     sBattler_AI = gActiveBattler;
-
-    // Decide a random target battlerId in doubles.
-    if (gBattleTypeFlags & BATTLE_TYPE_DOUBLE)
-    {
-        gBattlerTarget = (Random() & BIT_FLANK) + BATTLE_OPPOSITE(GetBattlerSide(gActiveBattler));
-        if (gAbsentBattlerFlags & gBitTable[gBattlerTarget])
-            gBattlerTarget ^= BIT_FLANK;
-    }
-    // There's only one choice in single battles.
-    else
-    {
-        gBattlerTarget = BATTLE_OPPOSITE(sBattler_AI);
-    }
-
-    // Choose proper trainer ai scripts.
-    if (gBattleTypeFlags & BATTLE_TYPE_RECORDED)
-        AI_THINKING_STRUCT->aiFlags = GetAiScriptsInRecordedBattle();
-    else if (gBattleTypeFlags & BATTLE_TYPE_SAFARI)
-        AI_THINKING_STRUCT->aiFlags = AI_SCRIPT_SAFARI;
-    else if (gBattleTypeFlags & BATTLE_TYPE_ROAMER)
-        AI_THINKING_STRUCT->aiFlags = AI_SCRIPT_ROAMING;
-    else if (gBattleTypeFlags & BATTLE_TYPE_FIRST_BATTLE)
-        AI_THINKING_STRUCT->aiFlags = AI_SCRIPT_FIRST_BATTLE;
-    else if (gBattleTypeFlags & BATTLE_TYPE_FACTORY)
-        AI_THINKING_STRUCT->aiFlags = GetAiScriptsInBattleFactory();
-    else if (gBattleTypeFlags & (BATTLE_TYPE_FRONTIER | BATTLE_TYPE_EREADER_TRAINER | BATTLE_TYPE_TRAINER_HILL | BATTLE_TYPE_SECRET_BASE))
-        AI_THINKING_STRUCT->aiFlags = AI_SCRIPT_CHECK_BAD_MOVE | AI_SCRIPT_CHECK_VIABILITY | AI_SCRIPT_TRY_TO_FAINT;
-    else if (gBattleTypeFlags & BATTLE_TYPE_TWO_OPPONENTS)
-        AI_THINKING_STRUCT->aiFlags = gTrainers[gTrainerBattleOpponent_A].aiFlags | gTrainers[gTrainerBattleOpponent_B].aiFlags;
-    else
-       AI_THINKING_STRUCT->aiFlags = gTrainers[gTrainerBattleOpponent_A].aiFlags;
-
-    if (gBattleTypeFlags & BATTLE_TYPE_DOUBLE)
-        AI_THINKING_STRUCT->aiFlags |= AI_SCRIPT_DOUBLE_BATTLE; // act smart in doubles and don't attack your partner
 }
 
 u8 BattleAI_ChooseMoveOrAction(void)
@@ -447,18 +474,8 @@ static u8 ChooseMoveOrAction_Singles(void)
 
 static u8 ChooseMoveOrAction_Doubles(void)
 {
-    s32 i;
-    s32 j;
-#ifndef BUGFIX
-    s32 scriptsToRun;
-#else
-    // the value assigned to this is a u32 (aiFlags)
-    // this becomes relevant because aiFlags can have bit 31 set
-    // and scriptsToRun is shifted
-    // this never happens in the vanilla game because bit 31 is
-    // only set when it's the first battle
+    s32 i, j;
     u32 scriptsToRun;
-#endif
     s16 bestMovePointsForTarget[MAX_BATTLERS_COUNT];
     s8 mostViableTargetsArray[MAX_BATTLERS_COUNT];
     u8 actionOrMoveIndex[MAX_BATTLERS_COUNT];
@@ -477,19 +494,13 @@ static u8 ChooseMoveOrAction_Doubles(void)
         }
         else
         {
-            if (gBattleTypeFlags & BATTLE_TYPE_PALACE)
-                BattleAI_SetupAIData(gBattleStruct->palaceFlags >> MAX_BATTLERS_COUNT);
-            else
-                BattleAI_SetupAIData(ALL_MOVES_MASK);
-
+            BattleAI_SetupAIData(ALL_MOVES_MASK);
             gBattlerTarget = i;
-
-            if ((i & BIT_SIDE) != (sBattler_AI & BIT_SIDE))
-                RecordLastUsedMoveByTarget();
-
+            RecordLastUsedMoveByTarget();
             AI_THINKING_STRUCT->aiLogicId = 0;
             AI_THINKING_STRUCT->movesetIndex = 0;
             scriptsToRun = AI_THINKING_STRUCT->aiFlags;
+            
             while (scriptsToRun != 0)
             {
                 if (scriptsToRun & 1)
@@ -502,47 +513,45 @@ static u8 ChooseMoveOrAction_Doubles(void)
                 AI_THINKING_STRUCT->movesetIndex = 0;
             }
 
-            if (AI_THINKING_STRUCT->aiAction & AI_ACTION_FLEE)
+            // 1. Calculate HP-based priority
+            s16 hpPriority = (gBattleMons[i].hp * 100) / gBattleMons[i].maxHP;
+            bestMovePointsForTarget[i] = (100 - hpPriority);  // Higher score for lower HP targets
+
+            // 2. Calculate Threat Level
+            s16 threatLevel = CalculateThreatLevel(i, sBattler_AI);
+            bestMovePointsForTarget[i] += threatLevel; // Increase score for high-threat targets
+
+            // 3. Consider Partner Support: Boost supportive moves if ally needs assistance
+            if (ShouldSupportPartner(sBattler_AI, i))
             {
-                actionOrMoveIndex[i] = AI_CHOICE_FLEE;
+                bestMovePointsForTarget[i] += 20; // Higher score for supportive actions when ally needs help
             }
-            else if (AI_THINKING_STRUCT->aiAction & AI_ACTION_WATCH)
+
+            // 4. Check the highest scoring moves
+            mostViableMovesScores[0] = AI_THINKING_STRUCT->score[0];
+            mostViableMovesIndices[0] = 0;
+            mostViableMovesNo = 1;
+            
+            for (j = 1; j < MAX_MON_MOVES; j++)
             {
-                actionOrMoveIndex[i] = AI_CHOICE_WATCH;
-            }
-            else
-            {
-                mostViableMovesScores[0] = AI_THINKING_STRUCT->score[0];
-                mostViableMovesIndices[0] = 0;
-                mostViableMovesNo = 1;
-                for (j = 1; j < MAX_MON_MOVES; j++)
+                if (gBattleMons[sBattler_AI].moves[j] != 0)
                 {
-                    if (gBattleMons[sBattler_AI].moves[j] != 0)
+                    if (mostViableMovesScores[0] == AI_THINKING_STRUCT->score[j])
                     {
-                        if (mostViableMovesScores[0] == AI_THINKING_STRUCT->score[j])
-                        {
-                            mostViableMovesScores[mostViableMovesNo] = AI_THINKING_STRUCT->score[j];
-                            mostViableMovesIndices[mostViableMovesNo] = j;
-                            mostViableMovesNo++;
-                        }
-                        if (mostViableMovesScores[0] < AI_THINKING_STRUCT->score[j])
-                        {
-                            mostViableMovesScores[0] = AI_THINKING_STRUCT->score[j];
-                            mostViableMovesIndices[0] = j;
-                            mostViableMovesNo = 1;
-                        }
+                        mostViableMovesScores[mostViableMovesNo] = AI_THINKING_STRUCT->score[j];
+                        mostViableMovesIndices[mostViableMovesNo] = j;
+                        mostViableMovesNo++;
+                    }
+                    if (mostViableMovesScores[0] < AI_THINKING_STRUCT->score[j])
+                    {
+                        mostViableMovesScores[0] = AI_THINKING_STRUCT->score[j];
+                        mostViableMovesIndices[0] = j;
+                        mostViableMovesNo = 1;
                     }
                 }
-                actionOrMoveIndex[i] = mostViableMovesIndices[Random() % mostViableMovesNo];
-                bestMovePointsForTarget[i] = mostViableMovesScores[0];
-
-                // Don't use a move against ally if it has less than 100 points.
-                if (i == BATTLE_PARTNER(sBattler_AI) && bestMovePointsForTarget[i] < 100)
-                {
-                    bestMovePointsForTarget[i] = -1;
-                    mostViableMovesScores[0] = mostViableMovesScores[0]; // Needed to match.
-                }
             }
+            
+            actionOrMoveIndex[i] = mostViableMovesIndices[Random() % mostViableMovesNo];
         }
     }
 
@@ -567,6 +576,42 @@ static u8 ChooseMoveOrAction_Doubles(void)
 
     gBattlerTarget = mostViableTargetsArray[Random() % mostViableTargetsNo];
     return actionOrMoveIndex[gBattlerTarget];
+}
+
+// Helper function to calculate threat level of an opponent based on their stats and moves
+static s16 CalculateThreatLevel(u8 target, u8 user)
+{
+    s16 threatScore = 0;
+    
+    if (gBattleMons[target].attack > gBattleMons[user].defense)
+        threatScore += 15;
+    if (gBattleMons[target].spAttack > gBattleMons[user].spDefense)
+        threatScore += 15;
+    if (gBattleMons[target].speed > gBattleMons[user].speed)
+        threatScore += 10;
+
+    // Further prioritize Pokémon with effective moves against the user
+    for (int i = 0; i < MAX_MON_MOVES; i++)
+    {
+        if (gBattleMons[target].moves[i] != MOVE_NONE)
+        {
+            u16 effectiveness = TypeCalc(gBattleMons[target].moves[i], target, user);
+            if (effectiveness == AI_EFFECTIVENESS_x4)
+                threatScore += 30;
+            else if (effectiveness == AI_EFFECTIVENESS_x2)
+                threatScore += 20;
+        }
+    }
+
+    return threatScore;
+}
+
+// Helper function to check if supporting partner would be beneficial
+static bool8 ShouldSupportPartner(u8 user, u8 target)
+{
+    if (GetBattlerSide(user) == GetBattlerSide(target) && gBattleMons[target].hp < gBattleMons[target].maxHP / 2)
+        return TRUE; // Ally is below half HP and could use support
+    return FALSE;
 }
 
 static void BattleAI_DoAIProcessing(void)
@@ -1484,13 +1529,8 @@ static void Cmd_get_highest_type_effectiveness(void)
 
         if (gCurrentMove != MOVE_NONE)
         {
-            // TypeCalc does not assign to gMoveResultFlags, Cmd_typecalc does
-            // This makes the check for gMoveResultFlags below always fail
-#ifdef BUGFIX
+            // Assigning the result of TypeCalc to gMoveResultFlags to ensure proper effectiveness calculation
             gMoveResultFlags = TypeCalc(gCurrentMove, sBattler_AI, gBattlerTarget);
-#else
-            TypeCalc(gCurrentMove, sBattler_AI, gBattlerTarget);
-#endif
 
             if (gBattleMoveDamage == 120) // Super effective STAB.
                 gBattleMoveDamage = AI_EFFECTIVENESS_x2;
@@ -1525,16 +1565,8 @@ static void Cmd_if_type_effectiveness(void)
     gBattleMoveDamage = AI_EFFECTIVENESS_x1;
     gCurrentMove = AI_THINKING_STRUCT->moveConsidered;
 
-    // TypeCalc does not assign to gMoveResultFlags, Cmd_typecalc does
-    // This makes the check for gMoveResultFlags below always fail
-    // This is how you get the "dual non-immunity" glitch, where AI
-    // will use ineffective moves on immune pokémon if the second type
-    // has a non-neutral, non-immune effectiveness
-#ifdef BUGFIX
+    // Assigning the result of TypeCalc to gMoveResultFlags to prevent the "dual non-immunity" glitch
     gMoveResultFlags = TypeCalc(gCurrentMove, sBattler_AI, gBattlerTarget);
-#else
-    TypeCalc(gCurrentMove, sBattler_AI, gBattlerTarget);
-#endif
 
     if (gBattleMoveDamage == 120) // Super effective STAB.
         gBattleMoveDamage = AI_EFFECTIVENESS_x2;
@@ -1609,9 +1641,9 @@ static void Cmd_if_status_not_in_party(void)
     u32 statusToCompareTo;
     u8 battlerId;
 
-    switch(gAIScriptPtr[1])
+    switch (gAIScriptPtr[1])
     {
-    case 1:
+    case AI_USER:
         battlerId = sBattler_AI;
         break;
     default:
@@ -1620,7 +1652,6 @@ static void Cmd_if_status_not_in_party(void)
     }
 
     party = (GetBattlerSide(battlerId) == B_SIDE_PLAYER) ? gPlayerParty : gEnemyParty;
-
     statusToCompareTo = T1_READ_32(gAIScriptPtr + 2);
 
     for (i = 0; i < PARTY_SIZE; i++)
@@ -1629,15 +1660,15 @@ static void Cmd_if_status_not_in_party(void)
         u16 hp = GetMonData(&party[i], MON_DATA_HP);
         u32 status = GetMonData(&party[i], MON_DATA_STATUS);
 
+        // If a Pokémon with the specified status is found, move the script pointer and return
         if (species != SPECIES_NONE && species != SPECIES_EGG && hp != 0 && status == statusToCompareTo)
         {
             gAIScriptPtr += 10;
-            #ifdef UBFIX
             return;
-            #endif
         }
     }
 
+    // If no Pokémon with the specified status is found, proceed with the AI script pointer
     gAIScriptPtr = T1_READ_PTR(gAIScriptPtr + 6);
 }
 
@@ -1774,17 +1805,17 @@ static void Cmd_if_cant_faint(void)
     gMoveResultFlags = 0;
     gCritMultiplier = 1;
     gCurrentMove = AI_THINKING_STRUCT->moveConsidered;
+
+    // Calculate damage
     AI_CalcDmg(sBattler_AI, gBattlerTarget);
     TypeCalc(gCurrentMove, sBattler_AI, gBattlerTarget);
 
+    // Ensure moves always do at least 1 damage
     gBattleMoveDamage = gBattleMoveDamage * AI_THINKING_STRUCT->simulatedRNG[AI_THINKING_STRUCT->movesetIndex] / 100;
-
-#ifdef BUGFIX
-    // Moves always do at least 1 damage.
     if (gBattleMoveDamage == 0)
         gBattleMoveDamage = 1;
-#endif
 
+    // Check if the damage can faint the target
     if (gBattleMons[gBattlerTarget].hp > gBattleMoveDamage)
         gAIScriptPtr = T1_READ_PTR(gAIScriptPtr + 1);
     else
@@ -1847,34 +1878,26 @@ static void Cmd_if_doesnt_have_move(void)
 {
     s32 i;
     const u16 *movePtr = (u16 *)(gAIScriptPtr + 2);
+    u8 battlerId;
 
-    switch(gAIScriptPtr[1])
+    // Determine the battler to check (either AI user or target)
+    if (gAIScriptPtr[1] == AI_USER || gAIScriptPtr[1] == AI_USER_PARTNER)
+        battlerId = sBattler_AI;
+    else
+        battlerId = gBattlerTarget;
+
+    // Check if the specified move is in the battler's moveset
+    for (i = 0; i < MAX_MON_MOVES; i++)
     {
-    case AI_USER:
-    case AI_USER_PARTNER: // UB: no separate check for user partner.
-        for (i = 0; i < MAX_MON_MOVES; i++)
-        {
-            if (gBattleMons[sBattler_AI].moves[i] == *movePtr)
-                break;
-        }
-        if (i != MAX_MON_MOVES)
-            gAIScriptPtr += 8;
-        else
-            gAIScriptPtr = T1_READ_PTR(gAIScriptPtr + 4);
-        break;
-    case AI_TARGET:
-    case AI_TARGET_PARTNER:
-        for (i = 0; i < MAX_MON_MOVES; i++)
-        {
-            if (BATTLE_HISTORY->usedMoves[gBattlerTarget].moves[i] == *movePtr)
-                break;
-        }
-        if (i != MAX_MON_MOVES)
-            gAIScriptPtr += 8;
-        else
-            gAIScriptPtr = T1_READ_PTR(gAIScriptPtr + 4);
-        break;
+        if (gBattleMons[battlerId].moves[i] == *movePtr)
+            break;
     }
+
+    // If the move was found, skip; otherwise, continue to the specified pointer
+    if (i != MAX_MON_MOVES)
+        gAIScriptPtr += 8;
+    else
+        gAIScriptPtr = T1_READ_PTR(gAIScriptPtr + 4);
 }
 
 static void Cmd_if_has_move_with_effect(void)
@@ -1895,18 +1918,14 @@ static void Cmd_if_has_move_with_effect(void)
         else
             gAIScriptPtr = T1_READ_PTR(gAIScriptPtr + 3);
         break;
+
     case AI_TARGET:
     case AI_TARGET_PARTNER:
         for (i = 0; i < MAX_MON_MOVES; i++)
         {
-            // BUG: checks sBattler_AI instead of gBattlerTarget.
-            #ifndef BUGFIX
-            if (gBattleMons[sBattler_AI].moves[i] != 0 && gBattleMoves[BATTLE_HISTORY->usedMoves[gBattlerTarget].moves[i]].effect == gAIScriptPtr[2])
+            // Corrected to use gBattlerTarget instead of sBattler_AI
+            if (gBattleMons[gBattlerTarget].moves[i] != 0 && gBattleMoves[gBattleMons[gBattlerTarget].moves[i]].effect == gAIScriptPtr[2])
                 break;
-            #else
-            if (gBattleMons[gBattlerTarget].moves[i] != 0 && gBattleMoves[BATTLE_HISTORY->usedMoves[gBattlerTarget].moves[i]].effect == gAIScriptPtr[2])
-                break;
-            #endif
         }
         if (i == MAX_MON_MOVES)
             gAIScriptPtr += 7;
@@ -2041,24 +2060,19 @@ static void Cmd_if_holds_item(void)
 {
     u8 battlerId = BattleAI_GetWantedBattler(gAIScriptPtr[1]);
     u16 item;
-    u8 itemLo, itemHi;
+    u16 itemCheck;
 
+    // Get the item held by the target or AI battler
     if ((battlerId & BIT_SIDE) == (sBattler_AI & BIT_SIDE))
         item = gBattleMons[battlerId].item;
     else
         item = BATTLE_HISTORY->itemEffects[battlerId];
 
-    itemHi = gAIScriptPtr[2];
-    itemLo = gAIScriptPtr[3];
+    // Correctly combine high and low bytes for itemCheck
+    itemCheck = (gAIScriptPtr[2] << 8) | gAIScriptPtr[3];
 
-#ifdef BUGFIX
-    // This bug doesn't affect the vanilla game because this script command
-    // is only used to check ITEM_PERSIM_BERRY, whose high byte happens to
-    // be 0.
-    if (((itemHi << 8) | itemLo) == item)
-#else
-    if ((itemLo | itemHi) == item)
-#endif
+    // Check if the combined itemCheck matches the held item
+    if (item == itemCheck)
         gAIScriptPtr = T1_READ_PTR(gAIScriptPtr + 4);
     else
         gAIScriptPtr += 8;
