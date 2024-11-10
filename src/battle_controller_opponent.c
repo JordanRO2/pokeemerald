@@ -1610,18 +1610,23 @@ static void OpponentHandleChooseItem(void)
     OpponentBufferExecCompleted();
 }
 
+// battle_controller_opponent.c
 static void OpponentHandleChoosePokemon(void)
 {
     s32 chosenMonId;
 
+    // Check if there's a predefined switch target, or decide otherwise
     if (*(gBattleStruct->AI_monToSwitchIntoId + gActiveBattler) == PARTY_SIZE)
     {
+        // Attempt to find the most suitable Pokémon to switch into
         chosenMonId = GetMostSuitableMonToSwitchInto();
 
+        // If no suitable Pokémon was found, fallback to first available Pokémon
         if (chosenMonId == PARTY_SIZE)
         {
             s32 battler1, battler2, firstId, lastId;
 
+            // Determine if it's a single or double battle
             if (!(gBattleTypeFlags & BATTLE_TYPE_DOUBLE))
             {
                 battler2 = battler1 = GetBattlerAtPosition(B_POSITION_OPPONENT_LEFT);
@@ -1632,18 +1637,27 @@ static void OpponentHandleChoosePokemon(void)
                 battler2 = GetBattlerAtPosition(B_POSITION_OPPONENT_RIGHT);
             }
 
+            // Handle multi-battle logic if applicable
             if (gBattleTypeFlags & (BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_TOWER_LINK_MULTI))
             {
                 if (gActiveBattler == 1)
-                    firstId = 0, lastId = PARTY_SIZE / 2;
+                {
+                    firstId = 0;
+                    lastId = PARTY_SIZE / 2;
+                }
                 else
-                    firstId = PARTY_SIZE / 2, lastId = PARTY_SIZE;
+                {
+                    firstId = PARTY_SIZE / 2;
+                    lastId = PARTY_SIZE;
+                }
             }
             else
             {
-                firstId = 0, lastId = PARTY_SIZE;
+                firstId = 0;
+                lastId = PARTY_SIZE;
             }
 
+            // Fallback: Find first Pokémon with HP remaining that isn’t currently active
             for (chosenMonId = firstId; chosenMonId < lastId; chosenMonId++)
             {
                 if (GetMonData(&gEnemyParty[chosenMonId], MON_DATA_HP) != 0
@@ -1657,11 +1671,12 @@ static void OpponentHandleChoosePokemon(void)
     }
     else
     {
+        // Use predefined Pokémon to switch into
         chosenMonId = *(gBattleStruct->AI_monToSwitchIntoId + gActiveBattler);
         *(gBattleStruct->AI_monToSwitchIntoId + gActiveBattler) = PARTY_SIZE;
     }
 
-
+    // Set chosen Pokémon ID and signal completion
     *(gBattleStruct->monToSwitchIntoId + gActiveBattler) = chosenMonId;
     BtlController_EmitChosenMonReturnValue(BUFFER_B, chosenMonId, NULL);
     OpponentBufferExecCompleted();
