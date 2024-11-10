@@ -13,6 +13,9 @@
 #include "constants/moves.h"
 
 // Forward declarations
+static bool8 HasViableSwitch(void);
+static bool8 IsStatusMoveThatAffectsWonderGuard(u16 move);
+static bool8 FindMonThatAbsorbsOpponentsMove(void);
 static bool8 IsPredictedMoveSuperEffectiveAgainst(u8 battler, u8 potentialSwitchIn);
 static u16 PredictOpponentMove(u8 opponent);
 static s32 EstimateOpponentDamage(u8 battler, u8 opponent);
@@ -20,7 +23,7 @@ static bool8 ShouldHealConsideringBattleContext(void);
 static bool8 HasSuperEffectiveMoveAgainstOpponents(bool8 noRng);
 static bool8 FindMonWithFlagsAndSuperEffective(u8 flags, u8 moduloPercent);
 static bool8 ShouldUseItem(void);
-static int IsMoveEffectiveAgainstAbility(u16 move, u8 battler);
+static bool8 IsMoveEffectiveAgainstAbility(u16 move, u8 battler);
 static int TypeEffectiveness(u16 moveType, u16 targetType);
 static bool8 IsHazardousSwitch(u8 battler);
 static bool8 ShouldSwitchToRapidSpinUserIfHazards(void);
@@ -32,9 +35,15 @@ static int WasRecentlySwitchedIn(u8 battler);
 static int EvaluateConditionCure(void);
 static int EvaluateXStatItem(void);
 static int ShouldUseGuardSpec(void);
-static int CalculateHealAmount(void);
+static u16 CalculateHealAmount(void);
 static int HasPriorityMove(void);
 
+
+static bool8 IsSemiInvulnerableMove(u8 battler)
+{
+    u16 lastMove = gLastUsedMoves[battler];
+    return (lastMove == MOVE_FLY || lastMove == MOVE_DIG || lastMove == MOVE_DIVE);
+}
 
 static bool8 ShouldSwitchIfPerishSong(void)
 {
@@ -42,8 +51,8 @@ static bool8 ShouldSwitchIfPerishSong(void)
     if ((gStatuses3[gActiveBattler] & STATUS3_PERISH_SONG)
         && gDisableStructs[gActiveBattler].perishSongTimer <= 1) // Switch when 1 or fewer turns are left
     {
-        // Check for invulnerability status that might prevent Perish Song's effect.
-        if (gBattleMons[gActiveBattler].status2 & (STATUS2_FLYING | STATUS2_DIGGING | STATUS2_DIVING))
+        // Check if the last used move is a semi-invulnerable move.
+        if (IsSemiInvulnerableMove(gActiveBattler))
             return FALSE;
 
         // Check if Protect or Detect is active, as it may protect from a final Perish Song faint.
@@ -192,105 +201,6 @@ static bool8 ShouldSwitchIfWonderGuard(void)
     }
 
     return FALSE; // No viable Pokémon with a way to bypass Wonder Guard.
-}
-
-static bool8 FindMonThatAbsorbsOpponentsMove(void)
-{
-    u8 battlerIn1, battlerIn2;
-    u8 absorbingTypeAbility;
-    s32 firstId;
-    s32 lastId; // + 1
-    struct Pokemon *party;
-    s32 i;
-
-    if (HasSuperEffectiveMoveAgainstOpponents(TRUE) && Random() % 3 != 0)
-        return FALSE;
-    if (gLastLandedMoves[gActiveBattler] == MOVE_NONE)
-        return FALSE;
-    if (gLastLandedMoves[gActiveBattler] == MOVE_UNAVAILABLE)
-        return FALSE;
-    if (gBattleMoves[gLastLandedMoves[gActiveBattler]].power == 0)
-        return FALSE;
-
-    if (gBattleTypeFlags & BATTLE_TYPE_DOUBLE)
-    {
-        battlerIn1 = gActiveBattler;
-        if (gAbsentBattlerFlags & gBitTable[GetBattlerAtPosition(BATTLE_PARTNER(GetBattlerPosition(gActiveBattler)))])
-            battlerIn2 = gActiveBattler;
-        else
-            battlerIn2 = GetBattlerAtPosition(BATTLE_PARTNER(GetBattlerPosition(gActiveBattler)));
-    }
-    else
-    {
-        battlerIn1 = gActiveBattler;
-        battlerIn2 = gActiveBattler;
-    }
-
-    if (gBattleMoves[gLastLandedMoves[gActiveBattler]].type == TYPE_FIRE)
-        absorbingTypeAbility = ABILITY_FLASH_FIRE;
-    else if (gBattleMoves[gLastLandedMoves[gActiveBattler]].type == TYPE_WATER)
-        absorbingTypeAbility = ABILITY_WATER_ABSORB;
-    else if (gBattleMoves[gLastLandedMoves[gActiveBattler]].type == TYPE_ELECTRIC)
-        absorbingTypeAbility = ABILITY_VOLT_ABSORB;
-    else
-        return FALSE;
-
-    if (gBattleMons[gActiveBattler].ability == absorbingTypeAbility)
-        return FALSE;
-
-    if (gBattleTypeFlags & (BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_TOWER_LINK_MULTI))
-    {
-        if ((gActiveBattler & BIT_FLANK) == B_FLANK_LEFT)
-            firstId = 0, lastId = PARTY_SIZE / 2;
-        else
-            firstId = PARTY_SIZE / 2, lastId = PARTY_SIZE;
-    }
-    else
-    {
-        firstId = 0, lastId = PARTY_SIZE;
-    }
-
-    if (GetBattlerSide(gActiveBattler) == B_SIDE_PLAYER)
-        party = gPlayerParty;
-    else
-        party = gEnemyParty;
-
-    for (i = firstId; i < lastId; i++)
-    {
-        u16 species;
-        u8 monAbility;
-
-        if (GetMonData(&party[i], MON_DATA_HP) == 0)
-            continue;
-        if (GetMonData(&party[i], MON_DATA_SPECIES_OR_EGG) == SPECIES_NONE)
-            continue;
-        if (GetMonData(&party[i], MON_DATA_SPECIES_OR_EGG) == SPECIES_EGG)
-            continue;
-        if (i == gBattlerPartyIndexes[battlerIn1])
-            continue;
-        if (i == gBattlerPartyIndexes[battlerIn2])
-            continue;
-        if (i == *(gBattleStruct->monToSwitchIntoId + battlerIn1))
-            continue;
-        if (i == *(gBattleStruct->monToSwitchIntoId + battlerIn2))
-            continue;
-
-        species = GetMonData(&party[i], MON_DATA_SPECIES);
-        if (GetMonData(&party[i], MON_DATA_ABILITY_NUM) != 0)
-            monAbility = gSpeciesInfo[species].abilities[1];
-        else
-            monAbility = gSpeciesInfo[species].abilities[0];
-
-        if (absorbingTypeAbility == monAbility && Random() & 1)
-        {
-            // we found a mon.
-            *(gBattleStruct->AI_monToSwitchIntoId + gActiveBattler) = i;
-            BtlController_EmitTwoReturnValues(BUFFER_B, B_ACTION_SWITCH, 0);
-            return TRUE;
-        }
-    }
-
-    return FALSE;
 }
 
 static bool8 IsStatusMoveThatAffectsWonderGuard(u16 move)
