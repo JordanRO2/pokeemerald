@@ -20,6 +20,21 @@ static bool8 ShouldHealConsideringBattleContext(void);
 static bool8 HasSuperEffectiveMoveAgainstOpponents(bool8 noRng);
 static bool8 FindMonWithFlagsAndSuperEffective(u8 flags, u8 moduloPercent);
 static bool8 ShouldUseItem(void);
+static int IsMoveEffectiveAgainstAbility(u16 move, u8 battler);
+static int TypeEffectiveness(u16 moveType, u16 targetType);
+static bool8 IsHazardousSwitch(u8 battler);
+static bool8 ShouldSwitchToRapidSpinUserIfHazards(void);
+static s32 CalculateTypeAdvantageScore(void);
+static int CalculateAbilityAdvantageScore(void);
+static int WillTakeSignificantHazardDamage(u8 battler);
+static int HasStatBoosts(u8 battler);
+static int WasRecentlySwitchedIn(u8 battler);
+static int EvaluateConditionCure(void);
+static int EvaluateXStatItem(void);
+static int ShouldUseGuardSpec(void);
+static int CalculateHealAmount(void);
+static int HasPriorityMove(void);
+
 
 static bool8 ShouldSwitchIfPerishSong(void)
 {
@@ -888,9 +903,9 @@ static u8 TypeEffectiveness(u8 atkType, u8 defType)
 static bool8 IsHazardousSwitch(u8 battler)
 {
     // Check if Spikes are set and estimate the damage based on the number of layers.
-    if (gStatuses3[battler] & STATUS3_SPIKES)
+    if (gSideStatuses[GetBattlerSide(battler)] & SIDE_STATUS_SPIKES)
     {
-        // Calculate Spikes damage based on number of layers.
+        // Calculate Spikes damage based on the number of layers.
         u8 spikesLayers = gSideTimers[GetBattlerSide(battler)].spikesAmount;
         u16 spikesDamage = (spikesLayers * gBattleMons[battler].maxHP) / 8; // Each layer adds 1/8 of max HP
 
@@ -900,7 +915,7 @@ static bool8 IsHazardousSwitch(u8 battler)
     }
 
     // Check for Stealth Rock and estimate damage based on weaknesses.
-    if (gStatuses3[battler] & STATUS3_STEALTH_ROCK)
+    if (gSideStatuses[GetBattlerSide(battler)] & SIDE_STATUS_STEALTH_ROCK)
     {
         u16 rockDamage = GetStealthRockDamage(gBattleMons[battler].type1, gBattleMons[battler].type2, gBattleMons[battler].hp);
         if (gBattleMons[battler].hp <= rockDamage)
@@ -1197,8 +1212,16 @@ static bool8 IsMoveIndirectDamage(u16 move)
 
 static s32 CalculateAbilityAdvantageScore(u8 monId, u8 opposingBattler)
 {
-    u8 monAbility = GetMonData(&gPlayerParty[monId], MON_DATA_ABILITY);
     s32 score = 0;
+    u16 species = GetMonData(&gPlayerParty[monId], MON_DATA_SPECIES);
+    u8 abilitySlot = GetMonData(&gPlayerParty[monId], MON_DATA_ABILITY_NUM);
+    u8 monAbility;
+
+    // Get the actual ability ID based on the ability slot (primary or secondary).
+    if (abilitySlot == 0)
+        monAbility = gSpeciesInfo[species].abilities[0]; // Primary ability
+    else
+        monAbility = gSpeciesInfo[species].abilities[1]; // Secondary ability
 
     switch (monAbility)
     {
@@ -1226,15 +1249,15 @@ static bool8 WillTakeSignificantHazardDamage(u8 monId)
     u16 maxHp = GetMonData(&gPlayerParty[monId], MON_DATA_MAX_HP);
     u16 hazardDamage = 0;
 
-    // Check for Spikes damage based on number of layers.
-    if (gStatuses3[gActiveBattler] & STATUS3_SPIKES)
+    // Check for Spikes damage based on the number of layers.
+    if (gSideStatuses[GetBattlerSide(gActiveBattler)] & SIDE_STATUS_SPIKES)
     {
         u8 spikesLayers = gSideTimers[GetBattlerSide(gActiveBattler)].spikesAmount;
         hazardDamage += (spikesLayers * maxHp) / 8; // Each layer of Spikes deals 1/8 of max HP
     }
 
     // Check for Stealth Rock damage.
-    if (gStatuses3[gActiveBattler] & STATUS3_STEALTH_ROCK)
+    if (gSideStatuses[GetBattlerSide(gActiveBattler)] & SIDE_STATUS_STEALTH_ROCK)
     {
         hazardDamage += GetStealthRockDamage(type1, type2, maxHp);
     }
@@ -1610,7 +1633,7 @@ static bool8 ShouldSwitchToRapidSpinUserIfHazards(void)
     bool8 hasHazards = FALSE;
 
     // Check for entry hazards on the AI's side of the field (Spikes or Stealth Rock).
-    if (gStatuses3[gActiveBattler] & (STATUS3_SPIKES | STATUS3_STEALTH_ROCK))
+    if ((gSideStatuses[battlerSide] & SIDE_STATUS_SPIKES) || (gSideStatuses[battlerSide] & SIDE_STATUS_STEALTH_ROCK))
     {
         hasHazards = TRUE;
     }
