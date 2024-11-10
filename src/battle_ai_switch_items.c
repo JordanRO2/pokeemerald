@@ -1,5 +1,6 @@
 #include "global.h"
 #include "battle.h"
+#include "battle_ai_script_commands.h"
 #include "battle_anim.h"
 #include "battle_controllers.h"
 #include "battle_main.h"
@@ -31,13 +32,19 @@ static s32 CalculateTypeAdvantageScore(u8 monId, u8 opposingBattler); // Added p
 static s32 CalculateAbilityAdvantageScore(u8 monId, u8 opposingBattler); // Added parameters monId, opposingBattler
 static bool8 WillTakeSignificantHazardDamage(u8 monId); // Changed parameter to u8 monId
 static bool8 HasStatBoosts(u8 monId); // Changed parameter to u8 monId
-static bool8 WasRecentlySwitchedIn(u8 monId); // Changed parameter to u8 monId
 static bool8 IsValidSwitchTarget(u8 monId, u8 battlerIn1, u8 battlerIn2); // New forward declaration, parameters added
-static int EvaluateConditionCure(const u8 *itemEffects); // Added const u8* itemEffects as parameter
+static bool8 EvaluateConditionCure(const u8 *itemEffects); // Added const u8* itemEffects as parameter
 static int EvaluateXStatItem(const u8 *itemEffects); // Added const u8* itemEffects as parameter
 static int ShouldUseGuardSpec(void);
 static u16 CalculateHealAmount(u16 currentHp, u16 maxHp); // Added currentHp and maxHp parameters
 static bool8 HasPriorityMove(u8 opponent); // Changed parameter to u8 opponent
+static bool8 IsMoveIndirectDamage(u16 move);
+static bool8 UsingFullRestore(void);
+static bool8 UsingHyperPotion(void);
+static bool8 UsingSuperPotion(void);
+static bool8 HasPriorityMove(u8 opponent);
+static u8 GetAI_ItemType(u16 itemId, const u8 *itemEffect)
+
 
 
 static bool8 IsSemiInvulnerableMove(u8 battler)
@@ -996,10 +1003,6 @@ u8 GetMostSuitableMonToSwitchInto(void)
         if (HasStatBoosts(i))
             score += 20;
 
-        // Deduct points if this Pokémon was recently switched in
-        if (WasRecentlySwitchedIn(i))
-            score -= 10;
-
         // Update best score and best Pokémon ID if the current score is higher
         if (score > bestScore)
         {
@@ -1163,11 +1166,6 @@ static bool8 HasStatBoosts(u8 monId)
     return FALSE;
 }
 
-static bool8 WasRecentlySwitchedIn(u8 monId)
-{
-    return (gBattleMons[gActiveBattler].recentlySwitchedIn == monId);
-}
-
 static bool8 IsValidSwitchTarget(u8 monId, u8 battlerIn1, u8 battlerIn2)
 {
     if (GetMonData(&gPlayerParty[monId], MON_DATA_HP) == 0)
@@ -1271,6 +1269,8 @@ static s32 EstimateOpponentDamage(u8 battler, u8 opponent)
 
     return maxDamage;
 }
+
+
 
 
 // Main function with enhanced dynamic item usage
