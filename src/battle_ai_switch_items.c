@@ -1442,30 +1442,6 @@ static bool8 ShouldUseItem(void)
     return FALSE;
 }
 
-// Estimate the maximum potential damage from opponent's next move
-static s32 EstimateOpponentDamage(u8 battler, u8 opponent)
-{
-    s32 i;
-    s32 maxDamage = 0;
-    u16 move;
-    s32 damage;
-
-    for (i = 0; i < MAX_MON_MOVES; i++)
-    {
-        move = gBattleMons[opponent].moves[i];
-        if (move == MOVE_NONE)
-            continue;
-
-        gBattleMoveDamage = 0;
-        damage = AI_CalcDmg(opponent, battler, move);
-
-        if (damage > maxDamage)
-            maxDamage = damage;
-    }
-
-    return maxDamage;
-}
-
 // Determine if healing is beneficial given the opponent's damage potential and type advantage
 static bool8 ShouldHealConsideringBattleContext(void)
 {
