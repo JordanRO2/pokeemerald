@@ -319,7 +319,7 @@ static void RefinedScoreMove(u8 moveIndex)
     u16 score = 0;
     
     // 1. Type Effectiveness: Multiply score by effectiveness
-    u16 effectiveness = TypeCalc(move, sBattler_AI, target);
+    u16 effectiveness = TypeCalc(move, sBattler_AI, target); // Declaring effectiveness here
     if (effectiveness == AI_EFFECTIVENESS_x4)
         score += 40;
     else if (effectiveness == AI_EFFECTIVENESS_x2)
@@ -361,6 +361,88 @@ static void RefinedScoreMove(u8 moveIndex)
 
     // Store refined score
     AI_THINKING_STRUCT->score[moveIndex] = score;
+}
+    // Calculates the predicted damage of a move from user to target
+static u16 CalculatePredictedDamage(u8 user, u8 target, u16 move)
+{
+    u16 power = gBattleMoves[move].power;
+    u16 attackStat = (gBattleMoves[move].split == SPLIT_PHYSICAL) ? gBattleMons[user].attack : gBattleMons[user].spAttack;
+    u16 defenseStat = (gBattleMoves[move].split == SPLIT_PHYSICAL) ? gBattleMons[target].defense : gBattleMons[target].spDefense;
+
+    // Base damage formula; multiply by type effectiveness
+    u16 damage = (((2 * gBattleMons[user].level / 5 + 2) * power * attackStat / defenseStat) / 50) + 2;
+
+    // Type effectiveness calculation
+    u8 effectiveness = TypeCalc(move, user, target);
+    if (effectiveness == AI_EFFECTIVENESS_x4)
+        damage *= 4;
+    else if (effectiveness == AI_EFFECTIVENESS_x2)
+        damage *= 2;
+    else if (effectiveness == AI_EFFECTIVENESS_x0_5)
+        damage /= 2;
+    else if (effectiveness == AI_EFFECTIVENESS_x0_25)
+        damage /= 4;
+
+    return (damage > 1) ? damage : 1;  // Ensures at least 1 damage
+}
+
+// Determines if the opponent is likely to switch based on HP and type disadvantage
+static bool8 OpponentLikelyToSwitch(u8 target, u8 user)
+{
+    // Check if opponent is below a certain HP threshold or has a strong type disadvantage
+    if (gBattleMons[target].hp < gBattleMons[target].maxHP / 4)
+        return TRUE; // Likely to switch due to low HP
+
+    u8 effectiveness = TypeCalc(gBattleMons[user].moves[0], user, target);  // Sample the user's first move type effectiveness
+    if (effectiveness == AI_EFFECTIVENESS_x4 || effectiveness == AI_EFFECTIVENESS_x2)
+        return TRUE;  // Likely to switch due to type disadvantage
+
+    return FALSE;
+}
+
+// Checks if the opponent is likely to use a status move
+static bool8 OpponentLikelyToUseStatus(u8 target)
+{
+    s32 i;
+
+    // Check if the opponent's moveset has common status moves
+    for (i = 0; i < MAX_MON_MOVES; i++)
+    {
+        u16 move = gBattleMons[target].moves[i];
+        if (move != MOVE_NONE)
+        {
+            // Common status moves check
+            if (gBattleMoves[move].effect == EFFECT_SLEEP || 
+                gBattleMoves[move].effect == EFFECT_PARALYZE ||
+                gBattleMoves[move].effect == EFFECT_BURN ||
+                gBattleMoves[move].effect == EFFECT_POISON ||
+                gBattleMoves[move].effect == EFFECT_CONFUSE)
+            {
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
+
+// Determines if the AI should support its partner based on the partner's HP and needs
+static bool8 ShouldSupportPartner(u8 user, u8 partner)
+{
+    // Check if partner’s HP is low, indicating a need for support
+    if (gBattleMons[partner].hp < gBattleMons[partner].maxHP / 2)
+        return TRUE;  // Partner is in need of support
+
+    // Additional support logic: Check for boosting moves or healing moves in AI's moveset
+    for (int i = 0; i < MAX_MON_MOVES; i++)
+    {
+        u16 move = gBattleMons[user].moves[i];
+        if (move != MOVE_NONE)
+        {
+            if (gBattleMoves[move].effect == EFFECT_HEAL || gBattleMoves[move].effect == EFFECT_BOOST_STATS)
+                return TRUE;  // Has a supportive move that can benefit the partner
+        }
+    }
+    return FALSE;
 }
 
 // Updated scoring in the main AI processing function
@@ -474,7 +556,7 @@ static u8 ChooseMoveOrAction_Singles(void)
 
 static u8 ChooseMoveOrAction_Doubles(void)
 {
-    s32 i, j;
+    int i, j;
     u32 scriptsToRun;
     s16 bestMovePointsForTarget[MAX_BATTLERS_COUNT];
     s8 mostViableTargetsArray[MAX_BATTLERS_COUNT];
@@ -513,21 +595,21 @@ static u8 ChooseMoveOrAction_Doubles(void)
                 AI_THINKING_STRUCT->movesetIndex = 0;
             }
 
-            // 1. Calculate HP-based priority
-            s16 hpPriority = (gBattleMons[i].hp * 100) / gBattleMons[i].maxHP;
-            bestMovePointsForTarget[i] = (100 - hpPriority);  // Higher score for lower HP targets
+            // Calculate HP-based priority
+            s16 hpPriority = (gBattleMons[i].hp * 100) / gBattleMons[i].maxHP;  // Declared `hpPriority` here
+            bestMovePointsForTarget[i] = (100 - hpPriority);
 
-            // 2. Calculate Threat Level
-            s16 threatLevel = CalculateThreatLevel(i, sBattler_AI);
-            bestMovePointsForTarget[i] += threatLevel; // Increase score for high-threat targets
+            // Calculate Threat Level
+            s16 threatLevel = CalculateThreatLevel(i, sBattler_AI);  // Declared `threatLevel` here
+            bestMovePointsForTarget[i] += threatLevel;
 
-            // 3. Consider Partner Support: Boost supportive moves if ally needs assistance
+            // Consider Partner Support
             if (ShouldSupportPartner(sBattler_AI, i))
             {
-                bestMovePointsForTarget[i] += 20; // Higher score for supportive actions when ally needs help
+                bestMovePointsForTarget[i] += 20;
             }
 
-            // 4. Check the highest scoring moves
+            // Check the highest scoring moves
             mostViableMovesScores[0] = AI_THINKING_STRUCT->score[0];
             mostViableMovesIndices[0] = 0;
             mostViableMovesNo = 1;
@@ -555,6 +637,7 @@ static u8 ChooseMoveOrAction_Doubles(void)
         }
     }
 
+    // Determine the most viable target
     mostMovePoints = bestMovePointsForTarget[0];
     mostViableTargetsArray[0] = 0;
     mostViableTargetsNo = 1;
@@ -604,14 +687,6 @@ static s16 CalculateThreatLevel(u8 target, u8 user)
     }
 
     return threatScore;
-}
-
-// Helper function to check if supporting partner would be beneficial
-static bool8 ShouldSupportPartner(u8 user, u8 target)
-{
-    if (GetBattlerSide(user) == GetBattlerSide(target) && gBattleMons[target].hp < gBattleMons[target].maxHP / 2)
-        return TRUE; // Ally is below half HP and could use support
-    return FALSE;
 }
 
 static void BattleAI_DoAIProcessing(void)
@@ -1339,20 +1414,23 @@ static void Cmd_count_usable_party_mons(void)
     u8 battlerId;
     u8 battlerOnField1, battlerOnField2;
     struct Pokemon *party;
-    s32 i;
+    int i; // Changed from s32 to int for compatibility.
 
     AI_THINKING_STRUCT->funcResult = 0;
 
+    // Determine the battler ID based on AI script.
     if (gAIScriptPtr[1] == AI_USER)
         battlerId = sBattler_AI;
     else
         battlerId = gBattlerTarget;
 
+    // Determine which party to use based on the battler side.
     if (GetBattlerSide(battlerId) == B_SIDE_PLAYER)
         party = gPlayerParty;
     else
         party = gEnemyParty;
 
+    // For double battles, set battlers on the field; otherwise, set both to the same for single battles.
     if (gBattleTypeFlags & BATTLE_TYPE_DOUBLE)
     {
         u32 position;
@@ -1360,12 +1438,13 @@ static void Cmd_count_usable_party_mons(void)
         position = BATTLE_PARTNER(GetBattlerPosition(battlerId));
         battlerOnField2 = gBattlerPartyIndexes[GetBattlerAtPosition(position)];
     }
-    else // In singles there's only one battlerId by side.
+    else // In singles, there's only one battlerId per side.
     {
         battlerOnField1 = gBattlerPartyIndexes[battlerId];
         battlerOnField2 = gBattlerPartyIndexes[battlerId];
     }
 
+    // Count usable party members, excluding those on the field and any fainted or invalid members.
     for (i = 0; i < PARTY_SIZE; i++)
     {
         if (i != battlerOnField1 && i != battlerOnField2
@@ -1377,6 +1456,7 @@ static void Cmd_count_usable_party_mons(void)
         }
     }
 
+    // Move the AI script pointer forward.
     gAIScriptPtr += 2;
 }
 

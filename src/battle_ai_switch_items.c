@@ -343,7 +343,8 @@ static bool8 HasSuperEffectiveMoveAgainstOpponents(bool8 noRng)
 
             // Calculate type effectiveness and ability interaction.
             moveFlags = AI_TypeCalc(move, gBattleMons[opposingBattler].species, gBattleMons[opposingBattler].ability);
-            if ((moveFlags & MOVE_RESULT_SUPER_EFFECTIVE) && IsMoveEffectiveAgainstAbility(move, gBattleMons[opposingBattler].ability))
+            if ((moveFlags & MOVE_RESULT_SUPER_EFFECTIVE) && 
+                IsMoveEffectiveAgainstAbility(move, gBattleMons[opposingBattler].ability, gBattleMons[opposingBattler].item))
             {
                 if (noRng)
                     return TRUE;
@@ -370,7 +371,8 @@ static bool8 HasSuperEffectiveMoveAgainstOpponents(bool8 noRng)
 
             // Calculate type effectiveness and ability interaction.
             moveFlags = AI_TypeCalc(move, gBattleMons[opposingBattler].species, gBattleMons[opposingBattler].ability);
-            if ((moveFlags & MOVE_RESULT_SUPER_EFFECTIVE) && IsMoveEffectiveAgainstAbility(move, gBattleMons[opposingBattler].ability))
+            if ((moveFlags & MOVE_RESULT_SUPER_EFFECTIVE) && 
+                IsMoveEffectiveAgainstAbility(move, gBattleMons[opposingBattler].ability, gBattleMons[opposingBattler].item))
             {
                 if (noRng)
                     return TRUE;
@@ -1166,12 +1168,6 @@ static bool8 WillTakeSignificantHazardDamage(u8 monId)
         hazardDamage += (spikesLayers * maxHp) / 8; // Each layer of Spikes deals 1/8 of max HP
     }
 
-    // Check for Stealth Rock damage.
-    if (gSideStatuses[GetBattlerSide(gActiveBattler)] & SIDE_STATUS_STEALTH_ROCK)
-    {
-        hazardDamage += GetStealthRockDamage(type1, type2, maxHp);
-    }
-
     // Check if the cumulative hazard damage is significant (e.g., more than 25% of HP).
     return hazardDamage > (maxHp / 4); // Arbitrary threshold; adjust based on AI sensitivity
 }
@@ -1429,6 +1425,24 @@ static u16 CalculateHealAmount(u16 currentHp, u16 maxHp)
 
     // Cap healing to prevent exceeding max HP
     return (currentHp + healAmount > maxHp) ? maxHp - currentHp : healAmount;
+}
+
+// Checks if the item being used is Full Restore
+static bool8 UsingFullRestore(void)
+{
+    return gLastUsedItem == ITEM_FULL_RESTORE;
+}
+
+// Checks if the item being used is Hyper Potion
+static bool8 UsingHyperPotion(void)
+{
+    return gLastUsedItem == ITEM_HYPER_POTION;
+}
+
+// Checks if the item being used is Super Potion
+static bool8 UsingSuperPotion(void)
+{
+    return gLastUsedItem == ITEM_SUPER_POTION;
 }
 
 // Check if the opponent has a priority move that could pose a follow-up KO threat
