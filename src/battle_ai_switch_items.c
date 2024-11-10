@@ -12,8 +12,9 @@
 #include "constants/item_effects.h"
 #include "constants/items.h"
 #include "constants/moves.h"
+#include "constants/battle_ai.h"
 
-// Forward declarations
+// Forward declarations (correctly formatted)
 static bool8 HasViableSwitch(void);
 static bool8 IsStatusMoveThatAffectsWonderGuard(u16 move);
 static bool8 FindMonThatAbsorbsOpponentsMove(void);
@@ -24,26 +25,30 @@ static bool8 ShouldHealConsideringBattleContext(void);
 static bool8 HasSuperEffectiveMoveAgainstOpponents(bool8 noRng);
 static bool8 FindMonWithFlagsAndSuperEffective(u8 flags, u8 moduloPercent);
 static bool8 ShouldUseItem(void);
-static bool8 IsMoveEffectiveAgainstAbility(u16 move, u8 battler, u16 itemId); // Added third parameter itemId
-static u8 TypeEffectiveness(u8 moveType, u8 targetType); // Changed return type to u8
+static bool8 IsMoveEffectiveAgainstAbility(u16 move, u16 ability, u16 itemId); // Corrected ability type
+static u8 TypeEffectiveness(u8 atkType, u8 defType);
 static bool8 IsHazardousSwitch(u8 battler);
 static bool8 ShouldSwitchToRapidSpinUserIfHazards(void);
-static s32 CalculateTypeAdvantageScore(u8 monId, u8 opposingBattler); // Added parameters monId, opposingBattler
-static s32 CalculateAbilityAdvantageScore(u8 monId, u8 opposingBattler); // Added parameters monId, opposingBattler
-static bool8 WillTakeSignificantHazardDamage(u8 monId); // Changed parameter to u8 monId
-static bool8 HasStatBoosts(u8 monId); // Changed parameter to u8 monId
-static bool8 IsValidSwitchTarget(u8 monId, u8 battlerIn1, u8 battlerIn2); // New forward declaration, parameters added
-static bool8 EvaluateConditionCure(const u8 *itemEffects); // Added const u8* itemEffects as parameter
-static int EvaluateXStatItem(const u8 *itemEffects); // Added const u8* itemEffects as parameter
-static int ShouldUseGuardSpec(void);
-static u16 CalculateHealAmount(u16 currentHp, u16 maxHp); // Added currentHp and maxHp parameters
-static bool8 HasPriorityMove(u8 opponent); // Changed parameter to u8 opponent
+static s32 CalculateTypeAdvantageScore(u8 monId, u8 opposingBattler);
+static s32 CalculateAbilityAdvantageScore(u8 monId, u8 opposingBattler);
+static bool8 WillTakeSignificantHazardDamage(u8 monId);
+static bool8 HasStatBoosts(u8 monId);
+static bool8 IsValidSwitchTarget(u8 monId, u8 battlerIn1, u8 battlerIn2);
+static bool8 EvaluateConditionCure(const u8 *itemEffects);
+static bool8 EvaluateXStatItem(const u8 *itemEffects); // Changed return type to bool8
+static bool8 ShouldUseGuardSpec(void);
+static u16 CalculateHealAmount(u16 currentHp, u16 maxHp);
+static bool8 HasPriorityMove(u8 opponent);
 static bool8 IsMoveIndirectDamage(u16 move);
 static bool8 UsingFullRestore(void);
 static bool8 UsingHyperPotion(void);
 static bool8 UsingSuperPotion(void);
-static bool8 HasPriorityMove(u8 opponent);
-static u8 GetAI_ItemType(u16 itemId, const u8 *itemEffect)
+static bool8 ShouldSwitchIfNaturalCure(void); // Add this declaration
+static bool8 IsBattlerTrapped(u8 battlerIndex); // Add this declaration
+static u8 GetAI_ItemType(u16 itemId, const u8 *itemEffect);
+static bool8 IsSemiInvulnerableMove(u8 battler);
+static void SetBattleParticipants(u8 *battlerIn1, u8 *battlerIn2, u8 *opposingBattler, s32 *firstId, s32 *lastId);
+static void ModulateByTypeEffectiveness(u8 atkType, u8 defType1, u8 defType2, u8 *var);
 
 
 
@@ -726,6 +731,18 @@ static bool8 ShouldSwitch(void)
     if (ShouldSwitchToRapidSpinUserIfHazards())
         return TRUE;
 
+    return FALSE;
+}
+
+// Implementation for ShouldSwitchIfNaturalCure
+static bool8 ShouldSwitchIfNaturalCure(void)
+{
+    if (gBattleMons[gActiveBattler].ability == ABILITY_NATURAL_CURE && gBattleMons[gActiveBattler].status1 != 0 && HasViableSwitch())
+    {
+        *(gBattleStruct->AI_monToSwitchIntoId + gActiveBattler) = PARTY_SIZE;
+        BtlController_EmitTwoReturnValues(BUFFER_B, B_ACTION_SWITCH, 0);
+        return TRUE;
+    }
     return FALSE;
 }
 

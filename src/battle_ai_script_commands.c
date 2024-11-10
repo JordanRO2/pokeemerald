@@ -13,6 +13,7 @@
 #include "constants/abilities.h"
 #include "constants/battle_ai.h"
 #include "constants/battle_move_effects.h"
+#include "battle_ai.h"
 #include "constants/items.h"
 #include "constants/moves.h"
 
@@ -42,6 +43,14 @@ AI scripts.
 */
 
 extern const u8 *const gBattleAI_ScriptsTable[];
+
+// Function declarations
+static u16 CalculatePredictedDamage(u8 user, u8 target, u16 move);
+static bool8 OpponentLikelyToSwitch(u8 target, u8 user); // Add user parameter
+static bool8 OpponentLikelyToUseStatus(u8 target);
+static bool8 ShouldSupportPartner(u8 user, u8 partner);
+static s16 CalculateThreatLevel(u8 target, u8 user);
+static u8 GetAI_ItemType(u8 itemId); // Add this declaration
 
 static u8 ChooseMoveOrAction_Singles(void);
 static u8 ChooseMoveOrAction_Doubles(void);
@@ -340,7 +349,7 @@ static void RefinedScoreMove(u8 moveIndex)
     // 3. Status Effects: Give additional score for moves inflicting status conditions
     if (gBattleMoves[move].effect == EFFECT_PARALYZE && !(gBattleMons[target].status1 & STATUS1_PARALYSIS))
         score += 15; // Paralysis can limit opponent's movement
-    if (gBattleMoves[move].effect == EFFECT_BURN && !(gBattleMons[target].status1 & STATUS1_BURN))
+    if (gBattleMoves[move].effect == EFFECT_BURN_HIT && !(gBattleMons[target].status1 & STATUS1_BURN))
         score += 10; // Burn reduces physical damage, useful against physical attackers
     if (gBattleMoves[move].effect == EFFECT_SLEEP && !(gBattleMons[target].status1 & STATUS1_SLEEP))
         score += 20; // Sleep is very powerful as it stops opponent from moving
@@ -366,8 +375,10 @@ static void RefinedScoreMove(u8 moveIndex)
 static u16 CalculatePredictedDamage(u8 user, u8 target, u16 move)
 {
     u16 power = gBattleMoves[move].power;
-    u16 attackStat = (gBattleMoves[move].split == SPLIT_PHYSICAL) ? gBattleMons[user].attack : gBattleMons[user].spAttack;
-    u16 defenseStat = (gBattleMoves[move].split == SPLIT_PHYSICAL) ? gBattleMons[target].defense : gBattleMons[target].spDefense;
+    
+    // Use default stats (for example, attack and defense)
+    u16 attackStat = gBattleMons[user].attack;
+    u16 defenseStat = gBattleMons[target].defense;
 
     // Base damage formula; multiply by type effectiveness
     u16 damage = (((2 * gBattleMons[user].level / 5 + 2) * power * attackStat / defenseStat) / 50) + 2;
