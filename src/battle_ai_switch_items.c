@@ -16,27 +16,28 @@
 static bool8 HasViableSwitch(void);
 static bool8 IsStatusMoveThatAffectsWonderGuard(u16 move);
 static bool8 FindMonThatAbsorbsOpponentsMove(void);
-static bool8 IsPredictedMoveSuperEffectiveAgainst(u8 battler, u8 potentialSwitchIn);
+static bool8 IsPredictedMoveSuperEffectiveAgainst(u8 battler, u8 potentialSwitchIn, u16 predictedMove);
 static u16 PredictOpponentMove(u8 opponent);
 static s32 EstimateOpponentDamage(u8 battler, u8 opponent);
 static bool8 ShouldHealConsideringBattleContext(void);
 static bool8 HasSuperEffectiveMoveAgainstOpponents(bool8 noRng);
 static bool8 FindMonWithFlagsAndSuperEffective(u8 flags, u8 moduloPercent);
 static bool8 ShouldUseItem(void);
-static bool8 IsMoveEffectiveAgainstAbility(u16 move, u8 battler);
-static int TypeEffectiveness(u16 moveType, u16 targetType);
+static bool8 IsMoveEffectiveAgainstAbility(u16 move, u8 battler, u16 itemId); // Added third parameter itemId
+static u8 TypeEffectiveness(u8 moveType, u8 targetType); // Changed return type to u8
 static bool8 IsHazardousSwitch(u8 battler);
 static bool8 ShouldSwitchToRapidSpinUserIfHazards(void);
-static s32 CalculateTypeAdvantageScore(void);
-static int CalculateAbilityAdvantageScore(void);
-static int WillTakeSignificantHazardDamage(u8 battler);
-static int HasStatBoosts(u8 battler);
-static int WasRecentlySwitchedIn(u8 battler);
-static int EvaluateConditionCure(void);
-static int EvaluateXStatItem(void);
+static s32 CalculateTypeAdvantageScore(u8 monId, u8 opposingBattler); // Added parameters monId, opposingBattler
+static s32 CalculateAbilityAdvantageScore(u8 monId, u8 opposingBattler); // Added parameters monId, opposingBattler
+static bool8 WillTakeSignificantHazardDamage(u8 monId); // Changed parameter to u8 monId
+static bool8 HasStatBoosts(u8 monId); // Changed parameter to u8 monId
+static bool8 WasRecentlySwitchedIn(u8 monId); // Changed parameter to u8 monId
+static bool8 IsValidSwitchTarget(u8 monId, u8 battlerIn1, u8 battlerIn2); // New forward declaration, parameters added
+static int EvaluateConditionCure(const u8 *itemEffects); // Added const u8* itemEffects as parameter
+static int EvaluateXStatItem(const u8 *itemEffects); // Added const u8* itemEffects as parameter
 static int ShouldUseGuardSpec(void);
-static u16 CalculateHealAmount(void);
-static int HasPriorityMove(void);
+static u16 CalculateHealAmount(u16 currentHp, u16 maxHp); // Added currentHp and maxHp parameters
+static bool8 HasPriorityMove(u8 opponent); // Changed parameter to u8 opponent
 
 
 static bool8 IsSemiInvulnerableMove(u8 battler)
@@ -826,24 +827,7 @@ static bool8 IsHazardousSwitch(u8 battler)
             return TRUE;
     }
 
-    // Check for Stealth Rock and estimate damage based on weaknesses.
-    if (gSideStatuses[GetBattlerSide(battler)] & SIDE_STATUS_STEALTH_ROCK)
-    {
-        u16 rockDamage = GetStealthRockDamage(gBattleMons[battler].type1, gBattleMons[battler].type2, gBattleMons[battler].hp);
-        if (gBattleMons[battler].hp <= rockDamage)
-            return TRUE; // Avoid if Stealth Rock damage would cause fainting.
-    }
     return FALSE; // Safe to switch
-}
-
-static u16 GetStealthRockDamage(u8 type1, u8 type2, u16 hp)
-{
-    u16 damage = hp / 8; // Neutral Stealth Rock damage
-    if (type1 == TYPE_FIRE || type1 == TYPE_FLYING || type2 == TYPE_FIRE || type2 == TYPE_FLYING)
-        damage = hp / 4; // Super-effective damage
-    if (type1 == TYPE_ICE || type1 == TYPE_BUG || type1 == TYPE_FIRE || type1 == TYPE_FLYING || type2 == TYPE_ICE || type2 == TYPE_BUG)
-        damage *= 2; // Double super-effective damage
-    return damage;
 }
 
 void AI_TrySwitchOrUseItem(void)
@@ -995,7 +979,7 @@ u8 GetMostSuitableMonToSwitchInto(void)
         // Add score based on type advantage and super-effective moves
         score += CalculateTypeAdvantageScore(i, opposingBattler);
 
-        // Add score for Pokémon’s health level
+        // Add score based on Pokémon’s health level
         if (hp > (gBattleMons[gActiveBattler].maxHP / 2))
             score += 10;
         else if (hp < (gBattleMons[gActiveBattler].maxHP / 4))
@@ -1004,11 +988,11 @@ u8 GetMostSuitableMonToSwitchInto(void)
         // Add score for beneficial abilities
         score += CalculateAbilityAdvantageScore(i, opposingBattler);
 
-        // Subtract points if the Pokémon is weak to entry hazards
+        // Subtract points if the Pokémon is vulnerable to entry hazards
         if (WillTakeSignificantHazardDamage(i))
             score -= 15;
 
-        // Add score for boosted stats
+        // Add score if the Pokémon has stat boosts
         if (HasStatBoosts(i))
             score += 20;
 
@@ -1016,7 +1000,7 @@ u8 GetMostSuitableMonToSwitchInto(void)
         if (WasRecentlySwitchedIn(i))
             score -= 10;
 
-        // Compare the current score with the best score
+        // Update best score and best Pokémon ID if the current score is higher
         if (score > bestScore)
         {
             bestScore = score;
@@ -1053,13 +1037,20 @@ static void SetBattleParticipants(u8 *battlerIn1, u8 *battlerIn2, u8 *opposingBa
     if (gBattleTypeFlags & (BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_TOWER_LINK_MULTI))
     {
         if ((gActiveBattler & BIT_FLANK) == B_FLANK_LEFT)
-            *firstId = 0, *lastId = PARTY_SIZE / 2;
+        {
+            *firstId = 0;
+            *lastId = PARTY_SIZE / 2;
+        }
         else
-            *firstId = PARTY_SIZE / 2, *lastId = PARTY_SIZE;
+        {
+            *firstId = PARTY_SIZE / 2;
+            *lastId = PARTY_SIZE;
+        }
     }
     else
     {
-        *firstId = 0, *lastId = PARTY_SIZE;
+        *firstId = 0;
+        *lastId = PARTY_SIZE;
     }
 }
 
@@ -1087,28 +1078,26 @@ static s32 CalculateTypeAdvantageScore(u8 monId, u8 opposingBattler)
         else if (moveFlags & MOVE_RESULT_NOT_VERY_EFFECTIVE)
             score -= 10; // Not-very-effective move penalty
 
-        // STAB Bonus: Score extra if the move type matches the Pokémon’s type(s)
+        // STAB Bonus
         if (moveType == monType1 || moveType == monType2)
         {
-            score += 5;               // Base STAB bonus
-            score += movePower / 20;   // Additional score proportional to move power
+            score += 5;
+            score += movePower / 20;
         }
 
-        // Additional score if move is both STAB and super-effective
         if ((moveFlags & MOVE_RESULT_SUPER_EFFECTIVE) && (moveType == monType1 || moveType == monType2))
         {
-            score += 10;  // Extra score for STAB and super-effective
-            score += movePower / 10; // Higher bonus based on move power
+            score += 10;
+            score += movePower / 10;
         }
 
-        // Indirect moves and priority moves scoring
         if (IsMoveIndirectDamage(move))
         {
-            score += 5; // Reward moves like Toxic or Leech Seed for strategic advantage
+            score += 5;
         }
         if (gBattleMoves[move].priority > 0)
         {
-            score += 8; // Additional score for priority moves
+            score += 8;
         }
     }
 
@@ -1127,29 +1116,22 @@ static s32 CalculateAbilityAdvantageScore(u8 monId, u8 opposingBattler)
     s32 score = 0;
     u16 species = GetMonData(&gPlayerParty[monId], MON_DATA_SPECIES);
     u8 abilitySlot = GetMonData(&gPlayerParty[monId], MON_DATA_ABILITY_NUM);
-    u8 monAbility;
-
-    // Get the actual ability ID based on the ability slot (primary or secondary).
-    if (abilitySlot == 0)
-        monAbility = gSpeciesInfo[species].abilities[0]; // Primary ability
-    else
-        monAbility = gSpeciesInfo[species].abilities[1]; // Secondary ability
+    u8 monAbility = abilitySlot == 0 ? gSpeciesInfo[species].abilities[0] : gSpeciesInfo[species].abilities[1];
 
     switch (monAbility)
     {
         case ABILITY_LEVITATE:
             if (gBattleMons[opposingBattler].types[0] == TYPE_GROUND || gBattleMons[opposingBattler].types[1] == TYPE_GROUND)
-                score += 10; // Bonus if opponent is Ground-type
+                score += 10;
             break;
         case ABILITY_FLASH_FIRE:
             if (gBattleMons[opposingBattler].types[0] == TYPE_FIRE || gBattleMons[opposingBattler].types[1] == TYPE_FIRE)
-                score += 10; // Bonus if opponent is Fire-type
+                score += 10;
             break;
         case ABILITY_WATER_ABSORB:
             if (gBattleMons[opposingBattler].types[0] == TYPE_WATER || gBattleMons[opposingBattler].types[1] == TYPE_WATER)
-                score += 10; // Bonus if opponent is Water-type
+                score += 10;
             break;
-        // Add cases for other abilities as needed
     }
     return score;
 }
@@ -1161,16 +1143,15 @@ static bool8 WillTakeSignificantHazardDamage(u8 monId)
     u16 maxHp = GetMonData(&gPlayerParty[monId], MON_DATA_MAX_HP);
     u16 hazardDamage = 0;
 
-    // Check for Spikes damage based on the number of layers.
     if (gSideStatuses[GetBattlerSide(gActiveBattler)] & SIDE_STATUS_SPIKES)
     {
         u8 spikesLayers = gSideTimers[GetBattlerSide(gActiveBattler)].spikesAmount;
-        hazardDamage += (spikesLayers * maxHp) / 8; // Each layer of Spikes deals 1/8 of max HP
+        hazardDamage += (spikesLayers * maxHp) / 8; // Each layer adds 1/8 of max HP
     }
 
-    // Check if the cumulative hazard damage is significant (e.g., more than 25% of HP).
-    return hazardDamage > (maxHp / 4); // Arbitrary threshold; adjust based on AI sensitivity
+    return hazardDamage > (maxHp / 4); // Arbitrary threshold for significant damage
 }
+
 
 static bool8 HasStatBoosts(u8 monId)
 {
@@ -1189,13 +1170,13 @@ static bool8 WasRecentlySwitchedIn(u8 monId)
 
 static bool8 IsValidSwitchTarget(u8 monId, u8 battlerIn1, u8 battlerIn2)
 {
-    // Validate Pokémon switch targets: not fainted, not an egg, not already in play, etc.
     if (GetMonData(&gPlayerParty[monId], MON_DATA_HP) == 0)
-        return FALSE;
+        return FALSE; // Pokémon is fainted
     if (gBattlerPartyIndexes[battlerIn1] == monId || gBattlerPartyIndexes[battlerIn2] == monId)
-        return FALSE;
+        return FALSE; // Pokémon is already in battle
     return TRUE;
 }
+
 
 static u8 GetAI_ItemType(u16 itemId, const u8 *itemEffect)
 {
@@ -1412,20 +1393,17 @@ static bool8 ShouldHealConsideringBattleContext(void)
 static u16 CalculateHealAmount(u16 currentHp, u16 maxHp)
 {
     u16 healAmount;
-
-    // Example: Adjust healAmount based on the item being used
     if (UsingFullRestore())
-        healAmount = maxHp; // Full Restore heals to max
+        healAmount = maxHp;
     else if (UsingHyperPotion())
-        healAmount = 200; // Hyper Potion heals a flat 200 HP
+        healAmount = 200;
     else if (UsingSuperPotion())
-        healAmount = 50; // Super Potion heals a flat 50 HP
+        healAmount = 50;
     else
-        healAmount = maxHp / 2; // Default to 50% healing if item type is unknown
-
-    // Cap healing to prevent exceeding max HP
+        healAmount = maxHp / 2;
     return (currentHp + healAmount > maxHp) ? maxHp - currentHp : healAmount;
 }
+
 
 // Checks if the item being used is Full Restore
 static bool8 UsingFullRestore(void)
@@ -1452,10 +1430,11 @@ static bool8 HasPriorityMove(u8 opponent)
     {
         u16 move = gBattleMons[opponent].moves[i];
         if (move != MOVE_NONE && gBattleMoves[move].priority > 0)
-            return TRUE; // Opponent has a priority move
+            return TRUE;
     }
     return FALSE;
 }
+
 
 // Helper functions for item effect evaluations
 
